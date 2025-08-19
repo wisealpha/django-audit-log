@@ -128,66 +128,35 @@ class AuditLog(object):
         setattr(sender, self.manager_name, descriptor)
 
     def copy_fields(self, model):
-        """
-        Creates copies of the fields we are keeping
-        track of for the provided model, returning a
-        dictionary mapping field name to a copied field object.
-        """
-        fields = {'__module__' : model.__module__}
-
-        for field in model._meta.fields:
-
-            if not field.name in self._exclude:
-
-                field  = copy.deepcopy(field)
-
-                if isinstance(field, models.AutoField):
-                    #we replace the AutoField of the original model
-                    #with an IntegerField because a model can
-                    #have only one autofield.
-
-                    field.__class__ = models.IntegerField
-
-                if field.primary_key:
-                    field.serialize = True
-
-                #OneToOne fields should really be tracked
-                #as ForeignKey fields
-                if isinstance(field, models.OneToOneField):
-                    field.__class__ = models.ForeignKey
-
-
-                if field.primary_key or field.unique:
-                    #unique fields of the original model
-                    #can not be guaranteed to be unique
-                    #in the audit log entry but they
-                    #should still be indexed for faster lookups.
-
-                    field.primary_key = False
-                    field._unique = False
-                    field.db_index = True
-
-
-                if field.remote_field and field.remote_field.related_name:
-                    field.remote_field.related_name = '_auditlog_{}_{}'.format(
-                        model._meta.model_name,
-                        field.remote_field.related_name
-                    )
-                elif field.remote_field:
-                    try:
-                        if field.remote_field.get_accessor_name():
-                            field.remote_field.related_name = '_auditlog_{}_{}'.format(
-                                model._meta.model_name,
-                                field.remote_field.get_accessor_name()
-                            )
-                    except e:
-                        pass
-
-                fields[field.name] = field
-
+        fields = {'__module__': model.__module__}
+        for original in model._meta.fields:
+            if original.name in self._exclude:
+                continue
+            f = copy.deepcopy(original)
+            if isinstance(f, models.AutoField):
+                f.__class__ = models.IntegerField
+            if isinstance(original, models.OneToOneField):
+                f.__class__ = models.ForeignKey
+            was_pk = bool(getattr(original, 'primary_key', False))
+            was_unique = bool(getattr(original, 'unique', False) or getattr(original, '_unique', False))
+            was_fk = isinstance(original, models.ForeignKey) or isinstance(original, models.OneToOneField)
+            had_db_index = bool(getattr(original, 'db_index', False))
+            if getattr(f, 'primary_key', False):
+                f.primary_key = False
+            if was_pk:
+                f.serialize = True
+            if getattr(f, 'unique', False):
+                f.unique = False
+            f._unique = False
+            f.db_index = was_pk or was_unique or was_fk or had_db_index
+            if f.remote_field:
+                try:
+                    if (accessor := f.remote_field.related_name or f.remote_field.get_accessor_name()):
+                        f.remote_field.related_name = f"_auditlog_{model._meta.model_name}_{accessor}"
+                except Exception:
+                    pass
+            fields[original.name] = f
         return fields
-
-
 
     def get_logging_fields(self, model):
         """
