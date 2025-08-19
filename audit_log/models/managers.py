@@ -3,7 +3,10 @@ from __future__ import unicode_literals
 import copy
 import datetime
 from django.db import models
-from django.utils.translation import ugettext_lazy as _
+try:
+    from django.utils.translation import ugettext_lazy as _  # i.e. Django < 4
+except ImportError:
+    from django.utils.translation import gettext_lazy as _   # i.e. Django >= 4
 from django.conf import settings
 
 from audit_log.models.fields import LastUserField
